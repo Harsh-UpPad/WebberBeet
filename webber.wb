@@ -1,0 +1,9 @@
+> This is a Huge Heading
+>> This is a Big Heading
+>>> This is a Medium Heading
+>>>> This is sub-medium text
+>>>>> This is small text
+>>>>>> This is tiny text
+This is |<bold text>|
+This is |:Itcalic text:|
+this is both |<: yay :>|
