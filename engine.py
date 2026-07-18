@@ -1,68 +1,84 @@
 import os
 import re
+import tkinter as tk
+from tkinter import ttk, font
 
-def JIT(path) -> list:
+# =====================================================================
+# 1. PARSING ENGINE SUBSYSTEM
+# =====================================================================
+
+# Globally compile regex patterns for speed and memory optimization
+HEADER_PATTERN = re.compile(r"^(>{1,6})\s+(.*)$")
+HEX_PATTERN = re.compile(r"^\*hexc\(H\!\s*([0-9A-Fa-f]{6})\)\*\s*(.*)")
+SIZE_PATTERN = re.compile(r"^\*size\(I\!\s*([0-9]{2})\)\*\s*(.*)")
+TOKEN_PATTERN = re.compile(r"(\|\<:[^|]+:\>\||\|\<[^|]+\>\||\|:[^|]+:\||\|[^|]+\||A\|[^|]+\|A)")
+
+DEFAULT_BASE_SIZE = 12
+
+# Map number of arrows to their respective typographic base sizes
+HEADER_SIZE_MAP = {
+    1: "hge", 
+    2: "bg", 
+    3: "med", 
+    4: "sma", 
+    5: "ser", 
+    6: "tet", 
+    7: DEFAULT_BASE_SIZE
+}
+
+def JIT(path: str) -> list[str]:
     """Reads file and returns raw unparsed line elements."""
     with open(path, "r", encoding="utf-8") as file:
-        return file.read().split("\n")
+        return file.read().splitlines()
 
-def parser(path) -> list:
+def parse_line_styles(segment: str, base_size: str) -> tuple[str, str]:
+    """Parses text segments for explicit typographic wrapper tags or structural size overrides."""
+    
+    # 1. Catch absolute inline size overrides first using the walrus operator
+    if size_match := SIZE_PATTERN.match(segment):
+        extracted_size, actual_content = size_match.groups()
+        base_size = f"size_{extracted_size}"
+        segment = actual_content
+
+    # 2. Map markdown prefixes to their corresponding style suffixes with the proper size context
+    tags = { 
+        "|<:": f"{base_size}_bi", 
+        "|<": f"{base_size}_bold", 
+        "|:": f"{base_size}_italic", 
+        "|": f"{base_size}_formatted" 
+    }
+
+    # 3. Check for matching structural tag bounds
+    for prefix, suffix in tags.items():
+        if segment.startswith(prefix):
+            strip_len = len(prefix)
+            return segment[strip_len:-strip_len], suffix
+            
+    return segment, base_size  # Return as plain text if no styling wrappers match
+
+def engine_parser(path: str) -> list[list[tuple[str, str]]]:
     """Scans headers and tokenizes bold-italic, bold, italic, and generic formatted segments."""
-    raw_lines = JIT(path)
     compiled_document = []
 
-    for line in raw_lines:
-        base_size = "normal"
-        clean_text = line
+    for line in JIT(path):
+        base_size, clean_text = "normal", line
 
-        # Classify header categories from deepest down to shallowest
-        if line.startswith(">>>>>> "):   base_size, clean_text = "tet", line[7:]
-        elif line.startswith(">>>>> "):  base_size, clean_text = "ser", line[6:]
-        elif line.startswith(">>>> "):   base_size, clean_text = "sma", line[5:]
-        elif line.startswith(">>> "):    base_size, clean_text = "med", line[4:]
-        elif line.startswith(">> "):     base_size, clean_text = "bg", line[3:]
-        elif line.startswith("> "):      base_size, clean_text = "hge", line[2:]
+        # Extract structural document headers using regex match groups
+        if header_match := HEADER_PATTERN.match(line):
+            arrows, clean_text = header_match.groups()
+            base_size = HEADER_SIZE_MAP.get(len(arrows), "normal")
 
-        # Unified single-pass regex: matches |<:bi:>| OR |<bold>| OR |:italics:| OR generic |formatted| spans
-        # Ordered from longest pattern string rule down to shortest pattern string rule to prevent truncation
-        combined_regex = r'(\|\<:[^|]+:\>\||\|\<[^|]+\>\||\|:[^|]+:\||\|[^|]+\|)'
-        segments = re.split(combined_regex, clean_text)
         line_tokens = []
+        for segment in filter(None, TOKEN_PATTERN.split(clean_text)):
+            content, style = parse_line_styles(segment, base_size)
 
-        for segment in segments:
-            if not segment:
-                continue
+            # Apply inline hexadecimal color overrides if present
+            if style != base_size and (color_match := HEX_PATTERN.match(content)):
+                hex_color, actual_content = color_match.groups()
+                style = f"color_{hex_color}" if style == "color_00FFF0" else f"{style}_color_{hex_color}"
+                content = actual_content
 
-            style_type = base_size
-            clean_text_segment = segment
-
-            # 1. Match Bold-Italic Token Layer: |<:text:>|
-            if segment.startswith("|<:") and segment.endswith(":>|"):
-                style_type, clean_text_segment = f"{base_size}_bi", segment[3:-3]
-
-            # 2. Match Bold Token Layer: |<text>|
-            elif segment.startswith("|<") and segment.endswith(">|"):
-                style_type, clean_text_segment = f"{base_size}_bold", segment[2:-2]
-
-            # 3. Match Italic Token Layer: |:text:|
-            elif segment.startswith("|:") and segment.endswith(":|"):
-                style_type, clean_text_segment = f"{base_size}_italic", segment[2:-2]
-
-            # 4. Match Generic Formatted Container Layer: |text|
-            elif segment.startswith("|") and segment.endswith("|"):
-                style_type, clean_text_segment = f"{base_size}_formatted", segment[1:-1]
-
-            # UNIFIED COLOR PROCESSOR: Inspects extracted text for your precise hex format rule
-            if style_type != base_size:
-                color_match = re.match(r'^\*hexc\(H\!\s*([0-9A-Fa-f]{6})\)\*\s*(.*)', clean_text_segment)
-                if color_match:
-                    hex_color = color_match.group(1)
-                    actual_content = color_match.group(2)
-                    
-                    style_type = f"{style_type}_color_{hex_color}"
-                    clean_text_segment = actual_content
-
-            line_tokens.append((clean_text_segment, style_type))
+            line_tokens.append((content, style))
 
         compiled_document.append(line_tokens)
         

@@ -16,7 +16,6 @@ class TkinterBrowserGUI:
         self.root.rowconfigure(2, weight=1)
         self.root.columnconfigure(0, weight=1)
 
-        # 1. Navigation Panel Controls
         toolbar = ttk.Frame(self.root, padding="5")
         toolbar.grid(row=0, column=0, sticky="ew")
 
@@ -37,14 +36,12 @@ class TkinterBrowserGUI:
         self.address_bar.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=5)
         self.address_bar.bind("<Return>", lambda event: self.ui_event_navigate())
 
-        # 2. Main Viewport Document Canvas
         self.viewport_label = ttk.Label(self.root, text="◤ Web Viewport Content Canvas", anchor="w", font=("Helvetica", 10, "bold"))
         self.viewport_label.grid(row=1, column=0, sticky="nw", padx=5)
         
         self.web_viewport = tk.Text(self.root, font=("Helvetica", 12), wrap="word", bg="#ffffff", fg="#000000", padx=15, pady=15)
         self.web_viewport.grid(row=1, column=0, sticky="nsew", padx=5, pady=(20, 5))
         
-        # Define the typographic sizing map
         sizes = {
             "hge": 32,
             "bg": 22,
@@ -52,17 +49,16 @@ class TkinterBrowserGUI:
             "sma": 12,
             "ser": 10,
             "tet": 8,
-            "normal": 12
+            "normal": 12,
+            "formatted": 12
         }
 
-        # Dynamically loop and register base, bold, italic, and bold-italic tag configurations
-        for tag, size in sizes.items():
-            self.web_viewport.tag_configure(tag, font=font.Font(family="Helvetica", size=size))
-            self.web_viewport.tag_configure(f"{tag}_bold", font=font.Font(family="Helvetica", size=size, weight="bold"))
-            self.web_viewport.tag_configure(f"{tag}_italic", font=font.Font(family="Helvetica", size=size, slant="italic"))
-            self.web_viewport.tag_configure(f"{tag}_bi", font=font.Font(family="Helvetica", size=size, weight="bold", slant="italic"))
+        for tag, size_val in sizes.items():
+            self.web_viewport.tag_configure(tag, font=font.Font(family="Helvetica", size=size_val))
+            self.web_viewport.tag_configure(f"{tag}_bold", font=font.Font(family="Helvetica", size=size_val, weight="bold"))
+            self.web_viewport.tag_configure(f"{tag}_italic", font=font.Font(family="Helvetica", size=size_val, slant="italic"))
+            self.web_viewport.tag_configure(f"{tag}_bi", font=font.Font(family="Helvetica", size=size_val, weight="bold", slant="italic"))
 
-        # 4. Separate Developer Logs Frame
         self.console_label = ttk.Label(self.root, text="◤ Developer Console Output Log", anchor="w", font=("Helvetica", 10, "bold"))
         self.console_label.grid(row=2, column=0, sticky="nw", padx=5)
 
@@ -83,7 +79,6 @@ class TkinterBrowserGUI:
         self.web_viewport.config(state="disabled")
 
     def process_target_path(self, file_path):
-        """Passes track data to engine, dynamically registers custom page hex tokens, and paints viewport layouts."""
         self.web_viewport.config(state="normal")
         self.web_viewport.delete("1.0", tk.END)
 
@@ -94,30 +89,28 @@ class TkinterBrowserGUI:
 
         try:
             if os.path.exists(file_path):
-                tokenized_document = engine.parser(file_path)
+                tokenized_document = engine.JIT(file_path)
                 
                 for line_tokens in tokenized_document:
                     for text_segment, style_tag in line_tokens:
                         
-                        # DYNAMIC STYLE REGISTERING: Build hex colors cleanly if passed down by engine
                         if "_color_" in style_tag:
                             if style_tag not in self.web_viewport.tag_names():
                                 parts = style_tag.split("_color_")
-                                font_style_base = parts[0]  # e.g. "hge_bold" or "normal_formatted"
-                                hex_value = f"#{parts[1]}"  # e.g. "#FF0000"
+                                font_style_base = parts[0]
+                                hex_value = f"#{parts[1]}"
                                 
-                                # Fall back safely to standard mappings to resolve structural weight settings
-                                # Change "normal" to "roman" for the slant fallback configuration
                                 weight_setting = "bold" if "bold" in font_style_base or "bi" in font_style_base else "normal"
                                 slant_setting = "italic" if "italic" in font_style_base or "bi" in font_style_base else "roman"
-
                                 
-                                # Resolve point configuration size steps
                                 size_key = font_style_base.split("_")[0]
                                 size_map = {"hge": 32, "bg": 22, "med": 16, "sma": 12, "ser": 10, "tet": 8, "normal": 12, "formatted": 12}
-                                font_size = size_map.get(size_key, 12)
                                 
-                                # Bind the dynamic colored font tag configuration to your Tkinter session loop
+                                if size_key.startswith("size") and size_key[4:].isdigit():
+                                    font_size = int(size_key[4:])
+                                else:
+                                    font_size = size_map.get(size_key, 12)
+                                
                                 self.web_viewport.tag_configure(
                                     style_tag, 
                                     font=font.Font(family="Helvetica", size=font_size, weight=weight_setting, slant=slant_setting),
@@ -144,13 +137,14 @@ class TkinterBrowserGUI:
             self.update_ui_state(f"Navigating file pointer system to: {target}")
 
     def ui_event_back(self):
-        if self.history:
+        if len(self.history) > 1:
             item = self.history.pop()
             self.forward_stack.append(item)
+            previous_item = self.history[-1]
             self.address_bar.delete(0, tk.END)
-            self.address_bar.insert(0, item)
-            self.process_target_path(item)
-            self.update_ui_state(f"UI Event: Back tracking -> {item}")
+            self.address_bar.insert(0, previous_item)
+            self.process_target_path(previous_item)
+            self.update_ui_state(f"UI Event: Back tracking -> {previous_item}")
 
     def ui_event_forward(self):
         if self.forward_stack:
@@ -163,11 +157,14 @@ class TkinterBrowserGUI:
 
     def ui_event_refresh(self):
         current = self.address_bar.get().strip()
-        self.process_target_path(current)
-        self.update_ui_state(f"UI Event: Refreshing text cache buffer for: {current}")
+        if current:
+            self.process_target_path(current)
+            self.update_ui_state(f"UI Event: Refreshing text cache buffer for: {current}")
 
     def ui_event_home(self):
         self.address_bar.delete(0, tk.END)
+        self.history.clear()
+        self.forward_stack.clear()
         self.load_initial_view()
         self.update_ui_state("UI Event: Core canvas view reset to main screen.")
 
